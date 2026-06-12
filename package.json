@@ -1,0 +1,11 @@
+{
+  "name": "sunlife",
+  "version": "0.1.0",
+  "description": "Open-source sun & shadow explorer — see building shadows at any date/time and get year-round direct-sun reports for any spot. Built for home hunting.",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test",
+    "start": "python3 -m http.server 8000"
+  }
+}

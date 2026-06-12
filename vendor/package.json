@@ -1,0 +1,4 @@
+{
+  "type": "commonjs",
+  "comment": "Files in vendor/ are third-party UMD/CommonJS bundles; this keeps Node's require() working for tests while the root package stays ESM."
+}
