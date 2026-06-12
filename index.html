@@ -58,12 +58,19 @@
         <label class="check"><input id="toggle-3d" type="checkbox" /> 3D buildings</label>
         <label class="check" title="Include OSM trees, hedges and woods as shade sources. Deciduous trees drop their shadows in winter."><input id="toggle-trees" type="checkbox" checked /> 🌳 Trees</label>
         <button id="reload" title="Re-fetch OSM data for the current view">⟳ Data</button>
+        <button id="toggle-heatmap" title="Heatmap of direct-sun hours for every spot in the current view on the selected date. Click again to clear.">☀ Sun hours</button>
       </div>
 
       <p class="hint">💡 Click anywhere on the map for a <b>year-round sun report</b> —
       perfect for checking a garden, balcony or window before you commit to a home.</p>
 
       <div id="status" data-kind="hint">Move the map to load buildings</div>
+
+      <div id="heatmap-legend" class="heatmap-legend" hidden>
+        <span>0 h</span>
+        <div class="heatmap-gradient" title="Direct-sun hours, dark = always shaded, bright = full daylight"></div>
+        <span id="heatmap-legend-max">— h</span>
+      </div>
     </div>
   </aside>
 

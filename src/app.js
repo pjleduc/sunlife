@@ -622,3 +622,68 @@ $('q').addEventListener('keydown', (e) => {
 $('panel-toggle').addEventListener('click', () => {
   $('panel').classList.toggle('collapsed');
 });
+
+// ---------------------------------------------------------------------------
+// Sun-hours heatmap (☀ Sun hours button) — everything for this feature lives
+// in this section + src/heatmap.js + src/heatmap-worker.js. The import below
+// is hoisted like any ES module import; it sits here to keep the feature in
+// one contiguous block.
+// ---------------------------------------------------------------------------
+
+import { computeHeatmap, clearHeatmap } from './heatmap.js';
+
+// bbox: the view the heatmap was computed for. It stays pinned there when the
+// user pans; clicking ☀ again clears it, a fresh click recomputes for the new
+// view, and changing the date recomputes in place for the pinned bbox.
+const heatmapState = { active: false, bbox: null };
+
+async function runHeatmap(bbox) {
+  if (state.buildings.size === 0) {
+    setStatus('No buildings loaded — zoom in and let OSM data load first', 'hint');
+    return;
+  }
+  heatmapState.active = true;
+  heatmapState.bbox = bbox;
+  $('toggle-heatmap').classList.add('active');
+  setStatus('Computing sun-hours heatmap…', 'busy');
+  try {
+    const result = await computeHeatmap({
+      map,
+      bbox,
+      date: state.date,
+      buildings: [...state.buildings.values()],
+      trees: [...state.trees.values()],
+      treesEnabled: state.treesEnabled,
+      onProgress: (done, total) =>
+        setStatus(`Computing sun-hours heatmap… ${Math.round((done / total) * 100)}%`, 'busy'),
+    });
+    if (!result) return; // cancelled (cleared or superseded mid-compute)
+    $('heatmap-legend-max').textContent = `${result.maxHours.toFixed(1)} h`;
+    $('heatmap-legend').hidden = false;
+    setStatus('Sun-hours heatmap ready — pinned to this view, click ☀ to clear', 'ok');
+  } catch (err) {
+    console.error(err);
+    hideHeatmap();
+    setStatus('Heatmap computation failed', 'error');
+  }
+}
+
+function hideHeatmap() {
+  heatmapState.active = false;
+  heatmapState.bbox = null;
+  clearHeatmap(map); // also cancels an in-flight worker
+  $('heatmap-legend').hidden = true;
+  $('toggle-heatmap').classList.remove('active');
+  setStatus('Sun-hours heatmap cleared', 'ok');
+}
+
+$('toggle-heatmap').addEventListener('click', () => {
+  if (heatmapState.active) hideHeatmap();
+  else runHeatmap(viewBbox(0)); // current viewport, unpadded
+});
+
+// Recompute in place when the date changes while a heatmap is visible (this
+// listener runs after the one above that updates state.date).
+dateInput.addEventListener('change', () => {
+  if (heatmapState.active && heatmapState.bbox) runHeatmap(heatmapState.bbox);
+});

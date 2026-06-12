@@ -248,3 +248,28 @@ button:hover { background: #eef2f8; }
     max-height: 55vh;
   }
 }
+
+/* ---- sun-hours heatmap -------------------------------------------------- */
+
+#toggle-heatmap.active {
+  background: var(--gold);
+  border-color: #dfae3a;
+  font-weight: 600;
+}
+
+.heatmap-legend {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.heatmap-legend[hidden] { display: none; }
+.heatmap-gradient {
+  flex: 1;
+  height: 10px;
+  border-radius: 5px;
+  /* Keep in sync with COLOR_STOPS in src/heatmap.js. */
+  background: linear-gradient(to right, #0c1040 0%, #146e82 35%, #46aa5a 65%, #ffdc50 100%);
+}
