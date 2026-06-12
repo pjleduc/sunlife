@@ -3,7 +3,7 @@
 // when online) with a cache fallback; map tiles, Overpass, Nominatim and CDN
 // requests are left untouched.
 
-const CACHE = 'sunlife-v2';
+const CACHE = 'sunlife-v3';
 const SHELL = [
   './',
   './index.html',
@@ -14,6 +14,8 @@ const SHELL = [
   './src/buildings.js',
   './src/trees.js',
   './src/terrain.js',
+  './src/heatmap.js',
+  './src/heatmap-worker.js',
   './vendor/suncalc.js',
   './icons/icon-192.png',
   './icons/icon-512.png',
