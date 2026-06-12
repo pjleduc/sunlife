@@ -5,9 +5,12 @@ import {
   prepareObstacles,
   isSunBlocked,
   litWindows,
+  mPerDegLon,
+  M_PER_DEG_LAT,
 } from './geometry.js';
 import { fetchBuildings } from './buildings.js';
 import { fetchTrees, leafActive } from './trees.js';
+import { loadTerrainAround, TERRAIN_RESOLUTION_M } from './terrain.js';
 
 // ---------------------------------------------------------------------------
 // Config
@@ -33,6 +36,9 @@ const state = {
   buildings: new Map(), // id -> {id, rings, height, minHeight, heightSource}
   trees: new Map(), // id -> {id, rings, height, minHeight, leafCycle, kind}
   treesEnabled: true,
+  terrain: null, // TerrainGrid (src/terrain.js), loaded lazily on first report
+  terrainEnabled: true,
+  terrainLoading: false,
   coveredBboxes: [],
   reportPoint: null,
   reportMarker: null,
@@ -373,9 +379,44 @@ function setStatus(text, kind = 'ok') {
 // Sun report (click a point)
 // ---------------------------------------------------------------------------
 
-function computeDay(y, m, d, point, buildingObs, treeObs, step) {
+// Terrain occlusion: lazily fetch the elevation grid around the map center
+// the first time it's needed (first report, or terrain toggled back on with a
+// report open). Cached; reloaded only when a report point strays more than
+// 15 km from the cached grid's center. Re-runs the open report once loaded.
+const TERRAIN_RELOAD_DIST_M = 15000;
+
+async function ensureTerrain(point) {
+  if (!state.terrainEnabled || state.terrainLoading) return;
+  if (state.terrain) {
+    const c = state.terrain.center;
+    const dist = Math.hypot(
+      (point.lng - c.lng) * mPerDegLon(point.lat),
+      (point.lat - c.lat) * M_PER_DEG_LAT
+    );
+    if (dist <= TERRAIN_RELOAD_DIST_M) return;
+  }
+  state.terrainLoading = true;
+  setStatus('Loading terrain elevation tiles…', 'busy');
+  try {
+    state.terrain = await loadTerrainAround(map.getCenter());
+    setStatus('Terrain elevation loaded', 'ok');
+    if (state.reportPoint) runReport(state.reportPoint); // refine open report
+  } catch (err) {
+    console.error(err);
+    setStatus('Terrain failed to load — reports ignore hills for now', 'error');
+  } finally {
+    state.terrainLoading = false;
+  }
+}
+
+function computeDay(y, m, d, point, buildingObs, treeObs, step, terrain = null) {
   // Deciduous trees only obstruct in their leaf-on season for this month.
   const activeTreeObs = treeObs.filter((o) => leafActive(o.leafCycle, m, point.lat));
+  // Terrain check: building/tree heights are relative to local ground, so
+  // those tests stay as-is — terrain only adds a far-field horizon test from
+  // the eye's absolute elevation (ground + 1.5 m). terrain is non-null only
+  // when enabled, loaded and covering the point (see runReport).
+  const eyeElevation = terrain ? terrain.elevationAt(point.lng, point.lat) + 1.5 : 0;
   const samples = [];
   let possible = 0;
   let lit = 0;
@@ -386,7 +427,13 @@ function computeDay(y, m, d, point, buildingObs, treeObs, step) {
     if (pos.altitude <= 0) continue;
     possible += step;
     const dirs = sunDirections(pos.azimuth);
-    if (isSunBlocked(buildingObs, dirs.sunBearing, pos.altitude)) {
+    // Terrain first: if a hill hides the sun, the sample is fully blocked.
+    if (
+      terrain &&
+      terrain.sunBlockedByTerrain(point.lng, point.lat, eyeElevation, dirs.sunBearing, pos.altitude)
+    ) {
+      samples.push({ minutes: t, lit: false });
+    } else if (isSunBlocked(buildingObs, dirs.sunBearing, pos.altitude)) {
       samples.push({ minutes: t, lit: false });
     } else if (isSunBlocked(activeTreeObs, dirs.sunBearing, pos.altitude)) {
       treeFiltered += step;
@@ -413,21 +460,31 @@ function runReport(point) {
   panel.classList.add('visible');
   $('report-body').innerHTML = '<p class="muted">Computing sun exposure…</p>';
 
+  // Terrain loads async; ensureTerrain re-runs this report when it lands.
+  ensureTerrain(point);
+
   // Let the panel paint before the (sync) number crunching.
   setTimeout(() => {
     const buildingObs = prepareObstacles(point, [...state.buildings.values()]);
     const treeObs = state.treesEnabled
       ? prepareObstacles(point, [...state.trees.values()])
       : [];
+    // Terrain participates only when enabled, loaded and covering the point.
+    const terrain =
+      state.terrainEnabled &&
+      state.terrain &&
+      state.terrain.elevationAt(point.lng, point.lat) != null
+        ? state.terrain
+        : null;
     const { y, m, d } = state.date;
-    const day = computeDay(y, m, d, point, buildingObs, treeObs, DAY_STEP_MIN);
+    const day = computeDay(y, m, d, point, buildingObs, treeObs, DAY_STEP_MIN, terrain);
 
     const months = [];
     for (let mm = 0; mm < 12; mm++) {
-      const r = computeDay(y, mm, 21, point, buildingObs, treeObs, MONTH_STEP_MIN);
+      const r = computeDay(y, mm, 21, point, buildingObs, treeObs, MONTH_STEP_MIN, terrain);
       months.push({ month: mm, lit: r.lit, treeFiltered: r.treeFiltered, possible: r.possible });
     }
-    renderReport(point, day, months, buildingObs.length, treeObs.length);
+    renderReport(point, day, months, buildingObs.length, treeObs.length, !!terrain);
   }, 30);
 }
 
@@ -437,7 +494,7 @@ function hoursStr(min) {
   return `${(min / 60).toFixed(1)} h`;
 }
 
-function renderReport(point, day, months, buildingCount, treeCount) {
+function renderReport(point, day, months, buildingCount, treeCount, terrainUsed) {
   const dateStr = currentTime().toLocaleDateString(undefined, {
     month: 'long',
     day: 'numeric',
@@ -471,6 +528,11 @@ function renderReport(point, day, months, buildingCount, treeCount) {
     ? `<div class="report-tree">🌳 + ${hoursStr(day.treeFiltered)} more shaded only by trees</div>`
     : '';
 
+  // Fine-print note on whether the terrain horizon was part of this report.
+  const terrainNote = terrainUsed
+    ? `Terrain occlusion is included (AWS Terrain Tiles, ~${TERRAIN_RESOLUTION_M} m grid).`
+    : 'Ignores terrain.';
+
   $('report-body').innerHTML = `
     <div class="report-coords muted">${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}</div>
     <div class="report-day">
@@ -489,7 +551,7 @@ function renderReport(point, day, months, buildingCount, treeCount) {
     <p class="muted small">Based on ${buildingCount.toLocaleString()} buildings and
     ${treeCount.toLocaleString()} trees/woods nearby in OSM. Deciduous (and untagged)
     trees are treated as leafless in winter; tree sizes without OSM data are estimated.
-    Ignores terrain and floors above ground level. Times use your device's timezone.</p>`;
+    ${terrainNote} Ignores floors above ground level. Times use your device's timezone.</p>`;
 }
 
 $('report-close').addEventListener('click', () => {
@@ -585,6 +647,13 @@ $('toggle-trees').addEventListener('change', (e) => {
     !threeD && state.treesEnabled ? 'visible' : 'none'
   );
   scheduleSunUpdate();
+  if (state.reportPoint) runReport(state.reportPoint);
+});
+
+// Terrain toggle: re-running the report both applies the new setting and (via
+// ensureTerrain inside runReport) lazily loads the grid when switched on.
+$('toggle-terrain').addEventListener('change', (e) => {
+  state.terrainEnabled = e.target.checked;
   if (state.reportPoint) runReport(state.reportPoint);
 });
 
