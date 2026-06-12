@@ -5,9 +5,12 @@ import {
   prepareObstacles,
   isSunBlocked,
   litWindows,
+  mPerDegLon,
+  M_PER_DEG_LAT,
 } from './geometry.js';
 import { fetchBuildings } from './buildings.js';
 import { fetchTrees, leafActive } from './trees.js';
+import { loadTerrainAround, TERRAIN_RESOLUTION_M } from './terrain.js';
 
 // ---------------------------------------------------------------------------
 // Config
@@ -33,6 +36,10 @@ const state = {
   buildings: new Map(), // id -> {id, rings, height, minHeight, heightSource}
   trees: new Map(), // id -> {id, rings, height, minHeight, leafCycle, kind}
   treesEnabled: true,
+  viewpointHeight: 0, // meters above ground for sun reports (0 = ground)
+  terrain: null, // TerrainGrid (src/terrain.js), loaded lazily on first report
+  terrainEnabled: true,
+  terrainLoading: false,
   coveredBboxes: [],
   reportPoint: null,
   reportMarker: null,
@@ -373,9 +380,46 @@ function setStatus(text, kind = 'ok') {
 // Sun report (click a point)
 // ---------------------------------------------------------------------------
 
-function computeDay(y, m, d, point, buildingObs, treeObs, step) {
+// Terrain occlusion: lazily fetch the elevation grid around the map center
+// the first time it's needed (first report, or terrain toggled back on with a
+// report open). Cached; reloaded only when a report point strays more than
+// 15 km from the cached grid's center. Re-runs the open report once loaded.
+const TERRAIN_RELOAD_DIST_M = 15000;
+
+async function ensureTerrain(point) {
+  if (!state.terrainEnabled || state.terrainLoading) return;
+  if (state.terrain) {
+    const c = state.terrain.center;
+    const dist = Math.hypot(
+      (point.lng - c.lng) * mPerDegLon(point.lat),
+      (point.lat - c.lat) * M_PER_DEG_LAT
+    );
+    if (dist <= TERRAIN_RELOAD_DIST_M) return;
+  }
+  state.terrainLoading = true;
+  setStatus('Loading terrain elevation tiles…', 'busy');
+  try {
+    state.terrain = await loadTerrainAround(map.getCenter());
+    setStatus('Terrain elevation loaded', 'ok');
+    if (state.reportPoint) runReport(state.reportPoint); // refine open report
+  } catch (err) {
+    console.error(err);
+    setStatus('Terrain failed to load — reports ignore hills for now', 'error');
+  } finally {
+    state.terrainLoading = false;
+  }
+}
+
+function computeDay(y, m, d, point, buildingObs, treeObs, step, observerHeight = 0, terrain = null) {
   // Deciduous trees only obstruct in their leaf-on season for this month.
   const activeTreeObs = treeObs.filter((o) => leafActive(o.leafCycle, m, point.lat));
+  // Terrain check: building/tree heights are relative to local ground, so
+  // those tests stay as-is — terrain only adds a far-field horizon test from
+  // the eye's absolute elevation (ground + 1.5 m + any balcony/floor offset).
+  // terrain is non-null only when enabled, loaded and covering the point.
+  const eyeElevation = terrain
+    ? terrain.elevationAt(point.lng, point.lat) + 1.5 + observerHeight
+    : 0;
   const samples = [];
   let possible = 0;
   let lit = 0;
@@ -386,9 +430,15 @@ function computeDay(y, m, d, point, buildingObs, treeObs, step) {
     if (pos.altitude <= 0) continue;
     possible += step;
     const dirs = sunDirections(pos.azimuth);
-    if (isSunBlocked(buildingObs, dirs.sunBearing, pos.altitude)) {
+    // Terrain first: if a hill hides the sun, the sample is fully blocked.
+    if (
+      terrain &&
+      terrain.sunBlockedByTerrain(point.lng, point.lat, eyeElevation, dirs.sunBearing, pos.altitude)
+    ) {
       samples.push({ minutes: t, lit: false });
-    } else if (isSunBlocked(activeTreeObs, dirs.sunBearing, pos.altitude)) {
+    } else if (isSunBlocked(buildingObs, dirs.sunBearing, pos.altitude, observerHeight)) {
+      samples.push({ minutes: t, lit: false });
+    } else if (isSunBlocked(activeTreeObs, dirs.sunBearing, pos.altitude, observerHeight)) {
       treeFiltered += step;
       samples.push({ minutes: t, lit: false });
     } else {
@@ -413,21 +463,32 @@ function runReport(point) {
   panel.classList.add('visible');
   $('report-body').innerHTML = '<p class="muted">Computing sun exposure…</p>';
 
+  // Terrain loads async; ensureTerrain re-runs this report when it lands.
+  ensureTerrain(point);
+
   // Let the panel paint before the (sync) number crunching.
   setTimeout(() => {
     const buildingObs = prepareObstacles(point, [...state.buildings.values()]);
     const treeObs = state.treesEnabled
       ? prepareObstacles(point, [...state.trees.values()])
       : [];
+    // Terrain participates only when enabled, loaded and covering the point.
+    const terrain =
+      state.terrainEnabled &&
+      state.terrain &&
+      state.terrain.elevationAt(point.lng, point.lat) != null
+        ? state.terrain
+        : null;
     const { y, m, d } = state.date;
-    const day = computeDay(y, m, d, point, buildingObs, treeObs, DAY_STEP_MIN);
+    const vh = state.viewpointHeight;
+    const day = computeDay(y, m, d, point, buildingObs, treeObs, DAY_STEP_MIN, vh, terrain);
 
     const months = [];
     for (let mm = 0; mm < 12; mm++) {
-      const r = computeDay(y, mm, 21, point, buildingObs, treeObs, MONTH_STEP_MIN);
+      const r = computeDay(y, mm, 21, point, buildingObs, treeObs, MONTH_STEP_MIN, vh, terrain);
       months.push({ month: mm, lit: r.lit, treeFiltered: r.treeFiltered, possible: r.possible });
     }
-    renderReport(point, day, months, buildingObs.length, treeObs.length);
+    renderReport(point, day, months, buildingObs.length, treeObs.length, !!terrain);
   }, 30);
 }
 
@@ -437,7 +498,28 @@ function hoursStr(min) {
   return `${(min / 60).toFixed(1)} h`;
 }
 
-function renderReport(point, day, months, buildingCount, treeCount) {
+// Viewpoint height options: ground plus floors 1-10 at 3 m per floor + 1 m
+// standing eye / balcony-rail height.
+function ordinal(n) {
+  if (n % 100 >= 11 && n % 100 <= 13) return `${n}th`;
+  return `${n}${['th', 'st', 'nd', 'rd'][n % 10] || 'th'}`;
+}
+
+function viewpointOptions() {
+  const opts = [{ h: 0, label: 'Ground (0 m)' }];
+  for (let n = 1; n <= 10; n++) {
+    const h = n * 3 + 1;
+    opts.push({ h, label: `${ordinal(n)} floor (~${h} m)` });
+  }
+  return opts
+    .map(
+      (o) =>
+        `<option value="${o.h}"${o.h === state.viewpointHeight ? ' selected' : ''}>${o.label}</option>`
+    )
+    .join('');
+}
+
+function renderReport(point, day, months, buildingCount, treeCount, terrainUsed) {
   const dateStr = currentTime().toLocaleDateString(undefined, {
     month: 'long',
     day: 'numeric',
@@ -471,8 +553,22 @@ function renderReport(point, day, months, buildingCount, treeCount) {
     ? `<div class="report-tree">🌳 + ${hoursStr(day.treeFiltered)} more shaded only by trees</div>`
     : '';
 
+  const vh = state.viewpointHeight;
+  const viewpointNote = vh
+    ? ` Viewpoint elevated to ${vh} m; the building you clicked on is excluded as an
+    obstacle; walls of your own building behind the viewpoint are not modeled.`
+    : '';
+  // Fine-print note on whether the terrain horizon was part of this report.
+  const terrainNote = terrainUsed
+    ? `Terrain occlusion is included (AWS Terrain Tiles, ~${TERRAIN_RESOLUTION_M} m grid).`
+    : 'Ignores terrain.';
+
   $('report-body').innerHTML = `
     <div class="report-coords muted">${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}</div>
+    <div class="report-viewpoint">
+      <label for="viewpoint-height">Viewpoint:</label>
+      <select id="viewpoint-height">${viewpointOptions()}</select>
+    </div>
     <div class="report-day">
       <div class="report-big">${hoursStr(day.lit)}</div>
       <div>direct sun on ${dateStr}<br><span class="muted">of ${hoursStr(day.possible)} possible daylight</span></div>
@@ -489,7 +585,12 @@ function renderReport(point, day, months, buildingCount, treeCount) {
     <p class="muted small">Based on ${buildingCount.toLocaleString()} buildings and
     ${treeCount.toLocaleString()} trees/woods nearby in OSM. Deciduous (and untagged)
     trees are treated as leafless in winter; tree sizes without OSM data are estimated.
-    Ignores terrain and floors above ground level. Times use your device's timezone.</p>`;
+    ${terrainNote} Times use your device's timezone.${viewpointNote}</p>`;
+
+  $('viewpoint-height').addEventListener('change', (e) => {
+    state.viewpointHeight = Number(e.target.value);
+    if (state.reportPoint) runReport(state.reportPoint);
+  });
 }
 
 $('report-close').addEventListener('click', () => {
@@ -588,6 +689,13 @@ $('toggle-trees').addEventListener('change', (e) => {
   if (state.reportPoint) runReport(state.reportPoint);
 });
 
+// Terrain toggle: re-running the report both applies the new setting and (via
+// ensureTerrain inside runReport) lazily loads the grid when switched on.
+$('toggle-terrain').addEventListener('change', (e) => {
+  state.terrainEnabled = e.target.checked;
+  if (state.reportPoint) runReport(state.reportPoint);
+});
+
 $('reload').addEventListener('click', () => {
   state.coveredBboxes = [];
   loadBuildingsInView();
@@ -621,4 +729,69 @@ $('q').addEventListener('keydown', (e) => {
 
 $('panel-toggle').addEventListener('click', () => {
   $('panel').classList.toggle('collapsed');
+});
+
+// ---------------------------------------------------------------------------
+// Sun-hours heatmap (☀ Sun hours button) — everything for this feature lives
+// in this section + src/heatmap.js + src/heatmap-worker.js. The import below
+// is hoisted like any ES module import; it sits here to keep the feature in
+// one contiguous block.
+// ---------------------------------------------------------------------------
+
+import { computeHeatmap, clearHeatmap } from './heatmap.js';
+
+// bbox: the view the heatmap was computed for. It stays pinned there when the
+// user pans; clicking ☀ again clears it, a fresh click recomputes for the new
+// view, and changing the date recomputes in place for the pinned bbox.
+const heatmapState = { active: false, bbox: null };
+
+async function runHeatmap(bbox) {
+  if (state.buildings.size === 0) {
+    setStatus('No buildings loaded — zoom in and let OSM data load first', 'hint');
+    return;
+  }
+  heatmapState.active = true;
+  heatmapState.bbox = bbox;
+  $('toggle-heatmap').classList.add('active');
+  setStatus('Computing sun-hours heatmap…', 'busy');
+  try {
+    const result = await computeHeatmap({
+      map,
+      bbox,
+      date: state.date,
+      buildings: [...state.buildings.values()],
+      trees: [...state.trees.values()],
+      treesEnabled: state.treesEnabled,
+      onProgress: (done, total) =>
+        setStatus(`Computing sun-hours heatmap… ${Math.round((done / total) * 100)}%`, 'busy'),
+    });
+    if (!result) return; // cancelled (cleared or superseded mid-compute)
+    $('heatmap-legend-max').textContent = `${result.maxHours.toFixed(1)} h`;
+    $('heatmap-legend').hidden = false;
+    setStatus('Sun-hours heatmap ready — pinned to this view, click ☀ to clear', 'ok');
+  } catch (err) {
+    console.error(err);
+    hideHeatmap();
+    setStatus('Heatmap computation failed', 'error');
+  }
+}
+
+function hideHeatmap() {
+  heatmapState.active = false;
+  heatmapState.bbox = null;
+  clearHeatmap(map); // also cancels an in-flight worker
+  $('heatmap-legend').hidden = true;
+  $('toggle-heatmap').classList.remove('active');
+  setStatus('Sun-hours heatmap cleared', 'ok');
+}
+
+$('toggle-heatmap').addEventListener('click', () => {
+  if (heatmapState.active) hideHeatmap();
+  else runHeatmap(viewBbox(0)); // current viewport, unpadded
+});
+
+// Recompute in place when the date changes while a heatmap is visible (this
+// listener runs after the one above that updates state.date).
+dateInput.addEventListener('change', () => {
+  if (heatmapState.active && heatmapState.bbox) runHeatmap(heatmapState.bbox);
 });

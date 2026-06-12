@@ -208,16 +208,21 @@ function originInRings(rings) {
 // Is direct sun blocked at the prepared viewpoint? Casts a ray toward the sun
 // and checks whether the slab [minHeight, height] of any obstacle whose
 // footprint the ray crosses occludes the sun line (flat-terrain assumption).
-// The sun ray's height where it crosses the footprint between distances
-// tMin..tMax spans [tMin, tMax] * tan(altitude); the obstacle blocks iff that
-// span overlaps its slab. A viewpoint inside a footprint (tMin = 0) is always
-// blocked by a ground-based obstacle but can see under an elevated canopy.
-export function isSunBlocked(obstacles, sunBearing, altitude) {
+// The ray starts observerHeight meters above the ground (default 0), so its
+// height where it crosses the footprint between distances tMin..tMax spans
+// observerHeight + [tMin, tMax] * tan(altitude); the obstacle blocks iff that
+// span overlaps its slab. At ground level a viewpoint inside a footprint
+// (tMin = 0) is always blocked by a ground-based obstacle but can see under
+// an elevated canopy. With observerHeight > 0 the viewpoint is taken to be a
+// balcony/window OF the containing obstacle, which is skipped entirely (its
+// own walls behind the viewpoint are not modeled).
+export function isSunBlocked(obstacles, sunBearing, altitude, observerHeight = 0) {
   if (altitude <= 0) return true;
   const rx = Math.sin(sunBearing);
   const ry = Math.cos(sunBearing);
   const tanAlt = Math.tan(altitude);
   for (const ob of obstacles) {
+    if (observerHeight > 0 && ob.inside) continue; // own building: skip it
     let tMin = ob.inside ? 0 : Infinity;
     let tMax = -Infinity;
     for (const [ax, ay, bx, by] of ob.edges) {
@@ -233,7 +238,10 @@ export function isSunBlocked(obstacles, sunBearing, altitude) {
       if (t > tMax) tMax = t;
     }
     if (tMax < 0) continue; // ray never crosses this footprint
-    if (tMin * tanAlt <= ob.height && tMax * tanAlt >= (ob.minHeight || 0)) {
+    if (
+      observerHeight + tMin * tanAlt <= ob.height &&
+      observerHeight + tMax * tanAlt >= (ob.minHeight || 0)
+    ) {
       return true;
     }
   }
