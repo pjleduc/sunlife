@@ -1,0 +1,250 @@
+:root {
+  --bg: #ffffff;
+  --ink: #1d2733;
+  --muted: #6b7787;
+  --accent: #e8590c;
+  --gold: #ffd166;
+  --night: #27304f;
+  --border: #e3e7ee;
+  --shadow: 0 6px 24px rgba(20, 30, 50, 0.18);
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+#map { position: absolute; inset: 0; }
+
+#night-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 16, 38, 0.45);
+  display: none;
+  align-items: flex-start;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 5;
+}
+#night-overlay.visible { display: flex; }
+#night-overlay span {
+  margin-top: 18vh;
+  background: rgba(12, 18, 40, 0.85);
+  color: #dfe6ff;
+  padding: 8px 18px;
+  border-radius: 99px;
+  font-size: 14px;
+}
+
+/* ---- control panel ---------------------------------------------------- */
+
+#panel {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  width: 340px;
+  max-width: calc(100vw - 24px);
+  background: var(--bg);
+  color: var(--ink);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  z-index: 10;
+  overflow: hidden;
+}
+#panel header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px 6px;
+}
+#panel h1 { font-size: 18px; margin: 0; }
+#panel.collapsed #panel-body { display: none; }
+#panel-toggle {
+  border: none;
+  background: none;
+  font-size: 16px;
+  cursor: pointer;
+  color: var(--muted);
+}
+#panel-body { padding: 0 14px 12px; }
+
+.row { display: flex; gap: 8px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
+
+input[type='search'], input[type='date'] {
+  flex: 1;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 14px;
+  min-width: 0;
+}
+
+button {
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  background: #f7f9fc;
+  border-radius: 8px;
+  cursor: pointer;
+  color: var(--ink);
+}
+button:hover { background: #eef2f8; }
+
+.presets { display: flex; gap: 4px; }
+.presets button { padding: 6px 7px; font-size: 12px; }
+
+.time-row { flex-wrap: nowrap; }
+#play { width: 34px; flex: none; }
+#time {
+  flex: 1;
+  appearance: none;
+  height: 10px;
+  border-radius: 6px;
+  background: var(--night);
+  outline: none;
+}
+#time::-webkit-slider-thumb {
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  border: 3px solid var(--accent);
+  cursor: pointer;
+}
+#time::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  border: 3px solid var(--accent);
+  cursor: pointer;
+}
+.mono { font-variant-numeric: tabular-nums; font-weight: 600; min-width: 44px; text-align: center; }
+
+.readouts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.readout {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  background: #f7f9fc;
+  border-radius: 8px;
+  padding: 6px 8px;
+}
+.readout label { display: block; font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.readout b { font-size: 13px; }
+#sun-arrow {
+  display: inline-block;
+  font-size: 16px;
+  color: var(--accent);
+  transition: transform 0.15s linear;
+}
+
+.options { justify-content: space-between; }
+.check { font-size: 13px; display: flex; gap: 6px; align-items: center; cursor: pointer; }
+
+.hint { font-size: 12.5px; color: var(--muted); margin: 10px 0 0; line-height: 1.45; }
+
+#status {
+  margin-top: 10px;
+  font-size: 12px;
+  padding: 6px 9px;
+  border-radius: 8px;
+  background: #f1f5f9;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#status[data-kind='busy'] { background: #fff7e0; color: #8a6d1a; }
+#status[data-kind='error'] { background: #fdeaea; color: #a13030; }
+#status[data-kind='ok'] { background: #ecf8ef; color: #2c6e3f; }
+
+/* ---- sun report panel -------------------------------------------------- */
+
+#report {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 320px;
+  max-width: calc(100vw - 24px);
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+  background: var(--bg);
+  color: var(--ink);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  z-index: 10;
+  display: none;
+}
+#report.visible { display: block; }
+#report header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px 0;
+}
+#report h2 { font-size: 16px; margin: 0; }
+#report-close { border: none; background: none; font-size: 15px; color: var(--muted); }
+#report-body { padding: 6px 14px 14px; font-size: 13.5px; }
+#report-body h3 { font-size: 13px; margin: 14px 0 6px; }
+
+.report-coords { font-size: 11.5px; }
+.report-day { display: flex; gap: 10px; align-items: center; margin-top: 8px; line-height: 1.35; }
+.report-big { font-size: 30px; font-weight: 700; color: var(--accent); }
+.report-windows { margin-top: 8px; line-height: 1.5; }
+
+.muted { color: var(--muted); }
+.small { font-size: 11.5px; line-height: 1.45; }
+
+.bar-chart {
+  display: flex;
+  gap: 3px;
+  align-items: flex-end;
+  height: 120px;
+}
+.bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; height: 100%; }
+.bar-stack { position: relative; flex: 1; width: 100%; }
+.bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  border-radius: 3px 3px 0 0;
+}
+.bar.possible { background: #e8edf5; }
+.bar.tree { background: #9ccf8f; }
+.bar.lit { background: var(--gold); }
+.bar-col.current .bar.lit { background: var(--accent); }
+.bar-value { font-size: 9px; color: var(--muted); margin-top: 2px; }
+.bar-label { font-size: 10px; color: var(--muted); }
+
+.legend { display: flex; gap: 14px; font-size: 11px; color: var(--muted); margin-top: 6px; }
+.swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  margin-right: 4px;
+}
+.swatch.lit { background: var(--gold); }
+.swatch.tree { background: #9ccf8f; }
+.swatch.possible { background: #e8edf5; }
+
+.report-tree {
+  margin-top: 6px;
+  font-size: 12.5px;
+  color: #3e7a35;
+}
+
+@media (max-width: 720px) {
+  #panel { width: calc(100vw - 24px); }
+  #report {
+    top: auto;
+    bottom: 12px;
+    right: 12px;
+    left: 12px;
+    width: auto;
+    max-height: 55vh;
+  }
+}

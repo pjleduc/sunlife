@@ -1,0 +1,15 @@
+{
+  "name": "SunLife — sun & shadow explorer",
+  "short_name": "SunLife",
+  "description": "See building and tree shadows at any date and time, and get year-round direct-sun reports for any spot. Built for home hunting.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#27304f",
+  "theme_color": "#27304f",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

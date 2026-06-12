@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SunLife — sun &amp; shadow explorer for home hunting</title>
+  <meta name="description" content="Open-source sun and shadow simulator: see building shadows at any date and time, and get year-round direct-sun reports for any spot. Built for home hunters." />
+  <link rel="icon" href="icons/icon-192.png" type="image/png" />
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <meta name="theme-color" content="#27304f" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="map"></div>
+  <div id="night-overlay"><span>🌙 Sun is below the horizon</span></div>
+
+  <aside id="panel">
+    <header>
+      <h1>☀️ SunLife</h1>
+      <button id="panel-toggle" title="Collapse panel">▾</button>
+    </header>
+    <div id="panel-body">
+      <div class="row search-row">
+        <input id="q" type="search" placeholder="Search address or city…" autocomplete="off" />
+        <button id="search-btn" title="Search">🔍</button>
+      </div>
+
+      <div class="row">
+        <input id="date" type="date" />
+        <div class="presets">
+          <button data-preset="today" title="Today">Today</button>
+          <button data-preset="6-21" title="Summer solstice — highest sun">Jun&nbsp;21</button>
+          <button data-preset="3-20" title="Equinox">Mar&nbsp;20</button>
+          <button data-preset="12-21" title="Winter solstice — lowest sun, worst case">Dec&nbsp;21</button>
+        </div>
+      </div>
+
+      <div class="row time-row">
+        <button id="play" title="Animate the day">▶</button>
+        <input id="time" type="range" min="0" max="1435" step="5" />
+        <span id="time-label" class="mono">12:00</span>
+        <button id="now" title="Jump to current time">Now</button>
+      </div>
+
+      <div class="row readouts">
+        <div class="readout" title="Direction the sun is in">
+          <span id="sun-arrow">↑</span>
+          <div><label>Azimuth</label><b id="sun-az">—</b></div>
+        </div>
+        <div class="readout"><div><label>Altitude</label><b id="sun-alt">—</b></div></div>
+        <div class="readout"><div><label>Sunrise</label><b id="sunrise">—</b></div></div>
+        <div class="readout"><div><label>Sunset</label><b id="sunset">—</b></div></div>
+      </div>
+
+      <div class="row options">
+        <label class="check"><input id="toggle-3d" type="checkbox" /> 3D buildings</label>
+        <label class="check" title="Include OSM trees, hedges and woods as shade sources. Deciduous trees drop their shadows in winter."><input id="toggle-trees" type="checkbox" checked /> 🌳 Trees</label>
+        <button id="reload" title="Re-fetch OSM data for the current view">⟳ Data</button>
+      </div>
+
+      <p class="hint">💡 Click anywhere on the map for a <b>year-round sun report</b> —
+      perfect for checking a garden, balcony or window before you commit to a home.</p>
+
+      <div id="status" data-kind="hint">Move the map to load buildings</div>
+    </div>
+  </aside>
+
+  <aside id="report">
+    <header>
+      <h2>📍 Sun report</h2>
+      <button id="report-close" title="Close">✕</button>
+    </header>
+    <div id="report-body"></div>
+  </aside>
+
+  <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <script src="vendor/suncalc.js"></script>
+  <script type="module" src="src/app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./sw.js').catch(() => {});
+    }
+  </script>
+</body>
+</html>
