@@ -1,5 +1,7 @@
 # ☀️ SunLife
 
+**🔗 Live app: [pjleduc.github.io/sunlife](https://pjleduc.github.io/sunlife/)** — installable as an app via your browser's *Install* button or *Add to Home Screen*.
+
 **An open-source sun & shadow explorer for home hunting.** See exactly how
 sunlight falls on any address — at any time, on any day of the year — using
 real building shapes and heights from OpenStreetMap. Inspired by
