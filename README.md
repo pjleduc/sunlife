@@ -81,9 +81,11 @@ Then:
 
 ### Hosting (GitHub Pages)
 
-The app is plain static files; `.github/workflows/deploy.yml` publishes to
-GitHub Pages on every push to `main` (it enables Pages on first run). On a
-free GitHub plan the repository must be **public** for Pages to work.
+The app is plain static files; `.github/workflows/deploy.yml` syncs `main` to
+the `gh-pages` branch on every push, which GitHub Pages serves. On a free
+GitHub plan the repository must be **public** for Pages to work. (The branch
+route is used because the default workflow token lacks the admin permission
+needed to create a Pages site for the artifact-based flow.)
 
 ## How it works
 
