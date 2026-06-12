@@ -13,6 +13,11 @@ real building shapes and heights from OpenStreetMap. Inspired by
 *Click any spot to get its direct-sun windows for the day and a month-by-month
 chart of direct sun hours through the year.*
 
+![Trees in 3D with sun report](docs/screenshot-trees.png)
+*Trees, hedges and woodland cast shade too — with elevated canopies and
+seasonal leaf cycles. The report separates "direct sun" from "shaded only by
+trees" (gold vs. green bars).*
+
 ![Winter shadows screenshot](docs/screenshot-winter.png)
 *December 21, low morning sun: long shadows reveal which homes spend winter in
 the dark.*
@@ -27,8 +32,14 @@ the dark.*
   December 21 (the worst case that sells or sinks a south-facing garden)
 - 📍 **Year-round sun report** — click any point (garden, balcony, kitchen
   window) and get its direct-sun windows for the selected day plus hours of
-  direct sun per month, accounting for every surrounding building
-- 🏙️ **3D building view** — toggle extruded buildings to sanity-check heights
+  direct sun per month, accounting for every surrounding building and tree
+- 🌳 **Tree & vegetation shade** — individual trees, tree rows, hedges and
+  woodland from OSM cast shadows too, with **elevated canopies** (low sun
+  passes under a crown) and **seasonal leaf cycles**: deciduous trees stop
+  blocking sun in winter, so a maple-lined street stays bright in January.
+  Reports split "direct sun" from "shaded only by trees"
+- 🏙️ **3D building view** — toggle extruded buildings and floating tree
+  canopies to sanity-check heights
 - 🔎 **Address search** (Nominatim) and geolocation
 - 🔗 **Shareable URLs** — the map position lives in the URL hash, so you can
   bookmark each home you're considering
@@ -66,7 +77,16 @@ branch** on the repository root and it's live.
   [Overpass API](https://wiki.openstreetmap.org/wiki/Overpass_API). Heights use
   the `height` tag when present, `building:levels × 3.2 m` as a fallback, and
   an 8 m default otherwise (the status bar shows how much real height data your
-  area has).
+  area has). `min_height` is honored for bridges and arches.
+- **Trees** — `natural=tree` nodes become octagonal crowns (default 12 m tall,
+  8 m wide, crown base at 30% of height), `natural=tree_row` and
+  `barrier=hedge` ways become buffered strips, and `natural=wood` /
+  `landuse=forest` / `landcover=trees` areas become closed canopy. OSM
+  `height`, `est_height`, `diameter_crown`, `leaf_cycle` and `leaf_type` tags
+  are used when present. Deciduous trees (the default for untagged trees;
+  hedges default to evergreen) are removed from the simulation during the
+  leafless season — April–October is leaf-on in the northern hemisphere,
+  reversed in the southern.
 - **Shadows** — each footprint is swept along the shadow vector
   (`length = height / tan(altitude)`). Sun-facing edge runs become strip
   polygons, which tile the swept region exactly for convex footprints with no
@@ -85,7 +105,11 @@ covered by unit tests (`node --test`).
 
 - **Terrain is assumed flat.** Hills, ridges and valley walls are not
   considered (a big deal in mountainous areas — see roadmap).
-- **Trees and vegetation are not modeled** — OSM rarely has usable canopy data.
+- **Tree cover is only as good as OSM mapping.** Many neighborhoods have few
+  or no trees mapped, and most mapped trees lack height/crown/leaf tags, so
+  defaults are used. The 🌳 toggle lets you exclude trees entirely if you
+  don't trust local coverage. Trees in leaf are treated as fully opaque;
+  leafless deciduous trees as fully transparent — reality is in between.
 - **Heights are only as good as OSM.** In areas with little height data, most
   buildings fall back to estimates. The status bar and each sun report tell you
   how much is estimated; treat low-coverage areas with skepticism.
@@ -100,7 +124,7 @@ covered by unit tests (`node --test`).
 
 | Component | Source | License |
 | --- | --- | --- |
-| Building data | © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors via Overpass API | ODbL |
+| Building & tree data | © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors via Overpass API | ODbL |
 | Basemap tiles | [CARTO Positron](https://carto.com/basemaps/) (OSM data) | free for non-commercial use |
 | Geocoding | [Nominatim](https://nominatim.org/) | usage policy applies |
 | Sun math | [SunCalc](https://github.com/mourner/suncalc) | BSD-2-Clause |
@@ -120,9 +144,31 @@ node --test        # run the geometry/parsing unit tests
 
 No dependencies, no bundler: edit, refresh, done.
 
+## Related projects
+
+Surveyed before building tree support (June 2026) — none offered an open,
+self-hostable shadow simulator with vegetation:
+
+- [Shadowmap](https://app.shadowmap.org/) — polished commercial 3D product;
+  closed source.
+- [ShadeMap](https://shademap.app/) and its
+  [leaflet-](https://github.com/ted-piotrowski/leaflet-shadow-simulator)/
+  [mapbox-gl-shadow-simulator](https://github.com/ted-piotrowski/mapbox-gl-shadow-simulator)
+  libraries — excellent GPU shadow rendering incl. terrain, and tree shadows in
+  the app, but the libraries require an API key from shademap.app and ship as
+  minified bundles; the vegetation data is a proprietary service.
+- [perliedman/shadow-mapper](https://github.com/perliedman/shadow-mapper) —
+  true open source (ISC) with OSM buildings + elevation, but Python 2,
+  archived since 2020, no vegetation.
+- [UMEP/SOLWEIG](https://umep-docs.readthedocs.io/) — academic QGIS plugin
+  that does model vegetation shadows rigorously, but it's a desktop GIS
+  research tool, not a web map.
+
 ## Roadmap
 
+- [x] Tree, hedge and woodland shade from OSM with seasonal leaf cycles
 - [ ] Terrain occlusion from a DEM (e.g. AWS Terrain Tiles / Mapzen terrarium)
+- [ ] Partial transparency for leafless deciduous crowns (~40% blocking)
 - [ ] Report height offset ("my balcony is on the 3rd floor")
 - [ ] Annual sun-hours heatmap overlay for a whole neighborhood
 - [ ] Compare mode: pin several candidate homes side by side

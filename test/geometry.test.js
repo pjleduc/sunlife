@@ -7,7 +7,7 @@ import {
   mPerDegLon,
   sunDirections,
   sunShadowParams,
-  buildingShadowPolygons,
+  shadowPolygons,
   prepareObstacles,
   isSunBlocked,
   litWindows,
@@ -43,9 +43,9 @@ test('sunShadowParams: below horizon yields null, near horizon is clamped', () =
   assert.equal(sunShadowParams(0.001, 0).perMeter, 60);
 });
 
-test('buildingShadowPolygons: sun-facing north edge sweeps one strip', () => {
+test('shadowPolygons: sun-facing north edge sweeps one strip', () => {
   const params = sunShadowParams(Math.PI / 4, 0); // shadow straight north, 1:1
-  const polys = buildingShadowPolygons(square(), 10, params);
+  const polys = shadowPolygons(square(), 10, params);
   assert.equal(polys.length, 2); // footprint + single strip
 
   const strip = polys[1][0];
@@ -55,20 +55,20 @@ test('buildingShadowPolygons: sun-facing north edge sweeps one strip', () => {
   assert.ok(Math.abs(Math.max(...lats) - 2 * D) < 1e-7);
 });
 
-test('buildingShadowPolygons: diagonal sun merges adjacent facing edges into one strip', () => {
+test('shadowPolygons: diagonal sun merges adjacent facing edges into one strip', () => {
   const params = sunShadowParams(Math.PI / 4, Math.PI / 4); // shadow to the northeast
-  const polys = buildingShadowPolygons(square(), 10, params);
+  const polys = shadowPolygons(square(), 10, params);
   assert.equal(polys.length, 2); // east+north edges form one contiguous run
   const strip = polys[1][0];
   assert.equal(strip.length, 7); // 3 base vertices + 3 swept + closing point
 });
 
-test('buildingShadowPolygons: concave footprint does not crash and emits strips', () => {
+test('shadowPolygons: concave footprint does not crash and emits strips', () => {
   const lShape = [
     [[0, 0], [3 * D, 0], [3 * D, D], [D, D], [D, 3 * D], [0, 3 * D], [0, 0]],
   ];
   const params = sunShadowParams(Math.PI / 6, Math.PI / 3);
-  const polys = buildingShadowPolygons(lShape, 12, params);
+  const polys = shadowPolygons(lShape, 12, params);
   assert.ok(polys.length >= 2);
   for (const poly of polys) {
     for (const ring of poly) {
@@ -77,6 +77,16 @@ test('buildingShadowPolygons: concave footprint does not crash and emits strips'
       assert.deepEqual(first, last, 'rings must be closed');
     }
   }
+});
+
+test('shadowPolygons: elevated canopy shadow starts away from the footprint', () => {
+  const params = sunShadowParams(Math.PI / 4, 0); // shadow straight north, 1:1
+  // Crown slab from 5 m to 10 m: shadow spans 5 m..10 m north of each point.
+  const polys = shadowPolygons(square(), 10, params, 5);
+  assert.equal(polys.length, 2);
+  const allLats = polys.flatMap((poly) => poly.flatMap((ring) => ring.map((p) => p[1])));
+  assert.ok(Math.abs(Math.min(...allLats) - D / 2) < 1e-9, 'base shifted 5 m north');
+  assert.ok(Math.abs(Math.max(...allLats) - 2 * D) < 1e-7, 'tip lands 20 m north');
 });
 
 // A 40 m wide, 2 m deep, 10 m tall wall whose center is 10 m north of origin.
@@ -112,6 +122,32 @@ test('isSunBlocked: a point inside a building never gets direct sun', () => {
     { rings: square(), height: 10 },
   ]);
   assert.equal(isSunBlocked(inside, 0, Math.PI / 3), true);
+});
+
+test('isSunBlocked: sun passes under an elevated canopy', () => {
+  // Same wall but only its 8 m..10 m slab is solid (a raised crown).
+  const crown = { ...wall(10), minHeight: 8 };
+  const obstacles = prepareObstacles({ lng: 0, lat: 0 }, [crown]);
+  // At 30 degrees the sun line is at 5.2..6.4 m crossing the slab: under it.
+  assert.equal(isSunBlocked(obstacles, 0, (30 * Math.PI) / 180), false);
+  // At 40 degrees it is at 7.6..9.2 m: intersects the 8..10 m slab.
+  assert.equal(isSunBlocked(obstacles, 0, (40 * Math.PI) / 180), true);
+});
+
+test('isSunBlocked: under a canopy, high sun is blocked but low sun slips beneath', () => {
+  // 10 m half-width crown centered on the viewpoint, slab 4..10 m.
+  const m = (x) => x / M_PER_DEG_LAT;
+  const crown = {
+    rings: [
+      [[m(-10), m(-10)], [m(10), m(-10)], [m(10), m(10)], [m(-10), m(10)], [m(-10), m(-10)]],
+    ],
+    height: 10,
+    minHeight: 4,
+  };
+  const obstacles = prepareObstacles({ lng: 0, lat: 0 }, [crown]);
+  assert.equal(obstacles[0].inside, true);
+  assert.equal(isSunBlocked(obstacles, 0, (60 * Math.PI) / 180), true); // overhead crown
+  assert.equal(isSunBlocked(obstacles, 0, (15 * Math.PI) / 180), false); // under the crown edge
 });
 
 test('prepareObstacles: far-away buildings are dropped', () => {

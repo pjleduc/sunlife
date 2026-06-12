@@ -89,7 +89,7 @@ function pointInRing(point, ring) {
 }
 
 // One Overpass element -> array of {rings: [outer, ...holes]} polygons.
-function polygonsFromElement(el) {
+export function polygonsFromElement(el) {
   if (el.type === 'way' && el.geometry) {
     const ring = ringFromGeometry(el.geometry);
     if (!ringClosed(ring)) return [];
@@ -113,19 +113,12 @@ function polygonsFromElement(el) {
   return [];
 }
 
-// Fetch buildings in bbox {south, west, north, east}.
-// Returns [{id, rings, height, heightSource, tags}].
-export async function fetchBuildings(bbox, { signal } = {}) {
-  const b = `${bbox.south},${bbox.west},${bbox.north},${bbox.east}`;
-  const query = `
-    [out:json][timeout:30];
-    (
-      way["building"]["building"!="no"](${b});
-      relation["building"]["building"!="no"]["type"="multipolygon"](${b});
-    );
-    out tags geom;
-  `;
+export function bboxString(bbox) {
+  return `${bbox.south},${bbox.west},${bbox.north},${bbox.east}`;
+}
 
+// POST an Overpass QL query, trying each public endpoint in turn.
+export async function overpassFetch(query, { signal } = {}) {
   let lastError;
   for (const endpoint of OVERPASS_ENDPOINTS) {
     try {
@@ -137,24 +130,44 @@ export async function fetchBuildings(bbox, { signal } = {}) {
       });
       if (!res.ok) throw new Error(`Overpass HTTP ${res.status}`);
       const json = await res.json();
-      const buildings = [];
-      for (const el of json.elements || []) {
-        const { height, source } = heightFromTags(el.tags);
-        for (const [i, poly] of polygonsFromElement(el).entries()) {
-          buildings.push({
-            id: `${el.type}/${el.id}${i ? `/${i}` : ''}`,
-            rings: poly.rings,
-            height,
-            heightSource: source,
-            tags: el.tags || {},
-          });
-        }
-      }
-      return buildings;
+      return json.elements || [];
     } catch (err) {
       if (err.name === 'AbortError') throw err;
       lastError = err;
     }
   }
   throw lastError || new Error('All Overpass endpoints failed');
+}
+
+// Fetch buildings in bbox {south, west, north, east}.
+// Returns [{id, rings, height, minHeight, heightSource, tags}].
+export async function fetchBuildings(bbox, opts = {}) {
+  const b = bboxString(bbox);
+  const elements = await overpassFetch(
+    `
+    [out:json][timeout:30];
+    (
+      way["building"]["building"!="no"](${b});
+      relation["building"]["building"!="no"]["type"="multipolygon"](${b});
+    );
+    out tags geom;
+  `,
+    opts
+  );
+  const buildings = [];
+  for (const el of elements) {
+    const { height, source } = heightFromTags(el.tags);
+    const minHeight = parseLength(el.tags?.min_height) ?? 0;
+    for (const [i, poly] of polygonsFromElement(el).entries()) {
+      buildings.push({
+        id: `${el.type}/${el.id}${i ? `/${i}` : ''}`,
+        rings: poly.rings,
+        height,
+        minHeight: Math.max(0, Math.min(minHeight, height)),
+        heightSource: source,
+        tags: el.tags || {},
+      });
+    }
+  }
+  return buildings;
 }

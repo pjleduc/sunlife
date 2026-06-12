@@ -1,12 +1,13 @@
 import {
   sunDirections,
   sunShadowParams,
-  buildingShadowPolygons,
+  shadowPolygons,
   prepareObstacles,
   isSunBlocked,
   litWindows,
 } from './geometry.js';
 import { fetchBuildings } from './buildings.js';
+import { fetchTrees, leafActive } from './trees.js';
 
 // ---------------------------------------------------------------------------
 // Config
@@ -29,7 +30,9 @@ const now = new Date();
 const state = {
   date: { y: now.getFullYear(), m: now.getMonth(), d: now.getDate() },
   minutes: now.getHours() * 60 + Math.round(now.getMinutes() / 5) * 5,
-  buildings: new Map(), // id -> {id, rings, height, heightSource}
+  buildings: new Map(), // id -> {id, rings, height, minHeight, heightSource}
+  trees: new Map(), // id -> {id, rings, height, minHeight, leafCycle, kind}
+  treesEnabled: true,
   coveredBboxes: [],
   reportPoint: null,
   reportMarker: null,
@@ -63,6 +66,17 @@ map.on('load', () => {
   // Keep place labels above our overlays.
   const firstSymbol = map.getStyle().layers.find((l) => l.type === 'symbol')?.id;
 
+  map.addSource('tree-shadows', { type: 'geojson', data: EMPTY_FC });
+  map.addLayer(
+    {
+      id: 'tree-shadows',
+      type: 'fill',
+      source: 'tree-shadows',
+      paint: { 'fill-color': '#06300f', 'fill-opacity': 0.28, 'fill-antialias': false },
+    },
+    firstSymbol
+  );
+
   map.addSource('shadows', { type: 'geojson', data: EMPTY_FC });
   map.addLayer(
     {
@@ -73,6 +87,29 @@ map.on('load', () => {
     },
     firstSymbol
   );
+
+  map.addSource('trees', { type: 'geojson', data: EMPTY_FC });
+  map.addLayer(
+    {
+      id: 'trees-fill',
+      type: 'fill',
+      source: 'trees',
+      paint: { 'fill-color': '#5a9c4e', 'fill-opacity': 0.3 },
+    },
+    firstSymbol
+  );
+  map.addLayer({
+    id: 'trees-3d',
+    type: 'fill-extrusion',
+    source: 'trees',
+    layout: { visibility: 'none' },
+    paint: {
+      'fill-extrusion-color': '#5a9c4e',
+      'fill-extrusion-height': ['get', 'height'],
+      'fill-extrusion-base': ['get', 'minHeight'],
+      'fill-extrusion-opacity': 0.7,
+    },
+  });
 
   map.addSource('buildings', { type: 'geojson', data: EMPTY_FC });
   map.addLayer(
@@ -169,20 +206,31 @@ function updateSun() {
   const params = night ? null : sunShadowParams(pos.altitude, dirs.shadowBearing);
   if (!params) {
     map.getSource('shadows').setData(EMPTY_FC);
+    map.getSource('tree-shadows').setData(EMPTY_FC);
     return;
   }
-  const features = [];
-  for (const b of state.buildings.values()) {
-    features.push({
+
+  const shadowFC = (obstacles) => ({
+    type: 'FeatureCollection',
+    features: obstacles.map((o) => ({
       type: 'Feature',
       properties: {},
       geometry: {
         type: 'MultiPolygon',
-        coordinates: buildingShadowPolygons(b.rings, b.height, params),
+        coordinates: shadowPolygons(o.rings, o.height, params, o.minHeight),
       },
-    });
-  }
-  map.getSource('shadows').setData({ type: 'FeatureCollection', features });
+    })),
+  });
+
+  map.getSource('shadows').setData(shadowFC([...state.buildings.values()]));
+  map.getSource('tree-shadows').setData(shadowFC(activeTrees(state.date.m, c.lat)));
+}
+
+// Trees currently in leaf (deciduous ones drop out of the shadow simulation
+// in the leafless season), or none if tree shading is toggled off.
+function activeTrees(month, lat) {
+  if (!state.treesEnabled) return [];
+  return [...state.trees.values()].filter((t) => leafActive(t.leafCycle, month, lat));
 }
 
 function paintSliderTrack(times) {
@@ -250,16 +298,22 @@ async function loadBuildingsInView() {
   state.fetchController?.abort();
   const controller = new AbortController();
   state.fetchController = controller;
-  setStatus('Loading buildings from OpenStreetMap…', 'busy');
+  setStatus('Loading buildings & trees from OpenStreetMap…', 'busy');
   try {
-    const fetched = await fetchBuildings(bbox, { signal: controller.signal });
+    const [fetchedBuildings, fetchedTrees] = await Promise.all([
+      fetchBuildings(bbox, { signal: controller.signal }),
+      fetchTrees(bbox, { signal: controller.signal }),
+    ]);
     if (state.buildings.size > MAX_BUILDINGS) {
       state.buildings.clear();
+      state.trees.clear();
       state.coveredBboxes = [];
     }
-    for (const b of fetched) state.buildings.set(b.id, b);
+    for (const b of fetchedBuildings) state.buildings.set(b.id, b);
+    for (const t of fetchedTrees) state.trees.set(t.id, t);
     state.coveredBboxes.push(bbox);
     refreshBuildingsSource();
+    refreshTreesSource();
     updateSun();
     if (state.reportPoint) runReport(state.reportPoint);
     const measured = [...state.buildings.values()].filter(
@@ -269,13 +323,13 @@ async function loadBuildingsInView() {
       ? Math.round((measured / state.buildings.size) * 100)
       : 0;
     setStatus(
-      `${state.buildings.size.toLocaleString()} buildings · ${pct}% with height data`,
+      `${state.buildings.size.toLocaleString()} buildings (${pct}% with height data) · ${state.trees.size.toLocaleString()} trees`,
       'ok'
     );
   } catch (err) {
     if (err.name === 'AbortError') return;
     console.error(err);
-    setStatus('Failed to load buildings — try again shortly', 'error');
+    setStatus('Failed to load OpenStreetMap data — try again shortly', 'error');
   }
 }
 
@@ -289,6 +343,18 @@ function refreshBuildingsSource() {
     });
   }
   map.getSource('buildings')?.setData({ type: 'FeatureCollection', features });
+}
+
+function refreshTreesSource() {
+  const features = [];
+  for (const t of state.trees.values()) {
+    features.push({
+      type: 'Feature',
+      properties: { height: t.height, minHeight: t.minHeight, kind: t.kind },
+      geometry: { type: 'Polygon', coordinates: t.rings.map(closeRing) },
+    });
+  }
+  map.getSource('trees')?.setData({ type: 'FeatureCollection', features });
 }
 
 function closeRing(ring) {
@@ -307,21 +373,30 @@ function setStatus(text, kind = 'ok') {
 // Sun report (click a point)
 // ---------------------------------------------------------------------------
 
-function computeDay(y, m, d, point, obstacles, step) {
+function computeDay(y, m, d, point, buildingObs, treeObs, step) {
+  // Deciduous trees only obstruct in their leaf-on season for this month.
+  const activeTreeObs = treeObs.filter((o) => leafActive(o.leafCycle, m, point.lat));
   const samples = [];
   let possible = 0;
   let lit = 0;
+  let treeFiltered = 0;
   for (let t = 0; t < 1440; t += step) {
     const dt = new Date(y, m, d, 0, t);
     const pos = SunCalc.getPosition(dt, point.lat, point.lng);
     if (pos.altitude <= 0) continue;
     possible += step;
     const dirs = sunDirections(pos.azimuth);
-    const blocked = isSunBlocked(obstacles, dirs.sunBearing, pos.altitude);
-    if (!blocked) lit += step;
-    samples.push({ minutes: t, lit: !blocked });
+    if (isSunBlocked(buildingObs, dirs.sunBearing, pos.altitude)) {
+      samples.push({ minutes: t, lit: false });
+    } else if (isSunBlocked(activeTreeObs, dirs.sunBearing, pos.altitude)) {
+      treeFiltered += step;
+      samples.push({ minutes: t, lit: false });
+    } else {
+      lit += step;
+      samples.push({ minutes: t, lit: true });
+    }
   }
-  return { samples, possible, lit, windows: litWindows(samples, step) };
+  return { samples, possible, lit, treeFiltered, windows: litWindows(samples, step) };
 }
 
 function runReport(point) {
@@ -340,16 +415,19 @@ function runReport(point) {
 
   // Let the panel paint before the (sync) number crunching.
   setTimeout(() => {
-    const obstacles = prepareObstacles(point, [...state.buildings.values()]);
+    const buildingObs = prepareObstacles(point, [...state.buildings.values()]);
+    const treeObs = state.treesEnabled
+      ? prepareObstacles(point, [...state.trees.values()])
+      : [];
     const { y, m, d } = state.date;
-    const day = computeDay(y, m, d, point, obstacles, DAY_STEP_MIN);
+    const day = computeDay(y, m, d, point, buildingObs, treeObs, DAY_STEP_MIN);
 
     const months = [];
     for (let mm = 0; mm < 12; mm++) {
-      const r = computeDay(y, mm, 21, point, obstacles, MONTH_STEP_MIN);
-      months.push({ month: mm, lit: r.lit, possible: r.possible });
+      const r = computeDay(y, mm, 21, point, buildingObs, treeObs, MONTH_STEP_MIN);
+      months.push({ month: mm, lit: r.lit, treeFiltered: r.treeFiltered, possible: r.possible });
     }
-    renderReport(point, day, months, obstacles.length);
+    renderReport(point, day, months, buildingObs.length, treeObs.length);
   }, 30);
 }
 
@@ -359,7 +437,7 @@ function hoursStr(min) {
   return `${(min / 60).toFixed(1)} h`;
 }
 
-function renderReport(point, day, months, obstacleCount) {
+function renderReport(point, day, months, buildingCount, treeCount) {
   const dateStr = currentTime().toLocaleDateString(undefined, {
     month: 'long',
     day: 'numeric',
@@ -373,12 +451,14 @@ function renderReport(point, day, months, obstacleCount) {
   const bars = months
     .map((mo) => {
       const litH = ((mo.lit / maxPossible) * 100).toFixed(1);
+      const treeH = (((mo.lit + mo.treeFiltered) / maxPossible) * 100).toFixed(1);
       const possH = ((mo.possible / maxPossible) * 100).toFixed(1);
       const cur = mo.month === state.date.m ? ' current' : '';
-      const title = `${MONTH_NAMES[mo.month]} 21: ${hoursStr(mo.lit)} direct sun of ${hoursStr(mo.possible)} daylight`;
+      const title = `${MONTH_NAMES[mo.month]} 21: ${hoursStr(mo.lit)} direct sun + ${hoursStr(mo.treeFiltered)} under trees, of ${hoursStr(mo.possible)} daylight`;
       return `<div class="bar-col${cur}" title="${title}">
         <div class="bar-stack">
           <div class="bar possible" style="height:${possH}%"></div>
+          <div class="bar tree" style="height:${treeH}%"></div>
           <div class="bar lit" style="height:${litH}%"></div>
         </div>
         <div class="bar-value">${(mo.lit / 60).toFixed(1)}</div>
@@ -387,22 +467,29 @@ function renderReport(point, day, months, obstacleCount) {
     })
     .join('');
 
+  const treeLine = day.treeFiltered
+    ? `<div class="report-tree">🌳 + ${hoursStr(day.treeFiltered)} more shaded only by trees</div>`
+    : '';
+
   $('report-body').innerHTML = `
     <div class="report-coords muted">${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}</div>
     <div class="report-day">
       <div class="report-big">${hoursStr(day.lit)}</div>
       <div>direct sun on ${dateStr}<br><span class="muted">of ${hoursStr(day.possible)} possible daylight</span></div>
     </div>
+    ${treeLine}
     <div class="report-windows"><strong>Sun windows:</strong> ${windows}</div>
     <h3>Direct sun through the year</h3>
     <div class="bar-chart">${bars}</div>
     <div class="legend">
       <span><i class="swatch lit"></i> direct sun (h/day)</span>
+      <span><i class="swatch tree"></i> under trees</span>
       <span><i class="swatch possible"></i> daylight</span>
     </div>
-    <p class="muted small">Based on ${obstacleCount.toLocaleString()} nearby OSM buildings.
-    Ignores terrain, trees and balconies above; heights without OSM data are estimated.
-    Times use your device's timezone.</p>`;
+    <p class="muted small">Based on ${buildingCount.toLocaleString()} buildings and
+    ${treeCount.toLocaleString()} trees/woods nearby in OSM. Deciduous (and untagged)
+    trees are treated as leafless in winter; tree sizes without OSM data are estimated.
+    Ignores terrain and floors above ground level. Times use your device's timezone.</p>`;
 }
 
 $('report-close').addEventListener('click', () => {
@@ -475,7 +562,30 @@ $('toggle-3d').addEventListener('change', (e) => {
   const on = e.target.checked;
   map.setLayoutProperty('buildings-3d', 'visibility', on ? 'visible' : 'none');
   map.setLayoutProperty('buildings-fill', 'visibility', on ? 'none' : 'visible');
+  map.setLayoutProperty('trees-3d', 'visibility', on && state.treesEnabled ? 'visible' : 'none');
+  map.setLayoutProperty(
+    'trees-fill',
+    'visibility',
+    !on && state.treesEnabled ? 'visible' : 'none'
+  );
   map.easeTo({ pitch: on ? 50 : 0, duration: 600 });
+});
+
+$('toggle-trees').addEventListener('change', (e) => {
+  state.treesEnabled = e.target.checked;
+  const threeD = $('toggle-3d').checked;
+  map.setLayoutProperty(
+    'trees-3d',
+    'visibility',
+    threeD && state.treesEnabled ? 'visible' : 'none'
+  );
+  map.setLayoutProperty(
+    'trees-fill',
+    'visibility',
+    !threeD && state.treesEnabled ? 'visible' : 'none'
+  );
+  scheduleSunUpdate();
+  if (state.reportPoint) runReport(state.reportPoint);
 });
 
 $('reload').addEventListener('click', () => {
