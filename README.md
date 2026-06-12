@@ -49,6 +49,19 @@ open locally or host anywhere.
 
 ## Quick start
 
+**In your browser (hosted):** once GitHub Pages is enabled for this repository
+(the included `deploy.yml` workflow publishes automatically on every push to
+`main` — the repo must be public on a free GitHub plan), the app lives at:
+
+> **https://pjleduc.github.io/sunlife/**
+
+SunLife is a **PWA**: open that URL and use your browser's *Install app*
+button (Chrome/Edge address bar) or *Share → Add to Home Screen* (iPhone/iPad)
+to install it like a native app — handy for checking sun on-site during a
+viewing.
+
+**Locally:**
+
 ```sh
 git clone https://github.com/pjleduc/sunlife.git
 cd sunlife
@@ -66,8 +79,9 @@ Then:
 
 ### Hosting (GitHub Pages)
 
-The app is plain static files. Enable **Settings → Pages → Deploy from a
-branch** on the repository root and it's live.
+The app is plain static files; `.github/workflows/deploy.yml` publishes to
+GitHub Pages on every push to `main` (it enables Pages on first run). On a
+free GitHub plan the repository must be **public** for Pages to work.
 
 ## How it works
 
