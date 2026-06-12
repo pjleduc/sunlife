@@ -33,6 +33,7 @@ const state = {
   buildings: new Map(), // id -> {id, rings, height, minHeight, heightSource}
   trees: new Map(), // id -> {id, rings, height, minHeight, leafCycle, kind}
   treesEnabled: true,
+  viewpointHeight: 0, // meters above ground for sun reports (0 = ground)
   coveredBboxes: [],
   reportPoint: null,
   reportMarker: null,
@@ -373,7 +374,7 @@ function setStatus(text, kind = 'ok') {
 // Sun report (click a point)
 // ---------------------------------------------------------------------------
 
-function computeDay(y, m, d, point, buildingObs, treeObs, step) {
+function computeDay(y, m, d, point, buildingObs, treeObs, step, observerHeight = 0) {
   // Deciduous trees only obstruct in their leaf-on season for this month.
   const activeTreeObs = treeObs.filter((o) => leafActive(o.leafCycle, m, point.lat));
   const samples = [];
@@ -386,9 +387,9 @@ function computeDay(y, m, d, point, buildingObs, treeObs, step) {
     if (pos.altitude <= 0) continue;
     possible += step;
     const dirs = sunDirections(pos.azimuth);
-    if (isSunBlocked(buildingObs, dirs.sunBearing, pos.altitude)) {
+    if (isSunBlocked(buildingObs, dirs.sunBearing, pos.altitude, observerHeight)) {
       samples.push({ minutes: t, lit: false });
-    } else if (isSunBlocked(activeTreeObs, dirs.sunBearing, pos.altitude)) {
+    } else if (isSunBlocked(activeTreeObs, dirs.sunBearing, pos.altitude, observerHeight)) {
       treeFiltered += step;
       samples.push({ minutes: t, lit: false });
     } else {
@@ -420,11 +421,12 @@ function runReport(point) {
       ? prepareObstacles(point, [...state.trees.values()])
       : [];
     const { y, m, d } = state.date;
-    const day = computeDay(y, m, d, point, buildingObs, treeObs, DAY_STEP_MIN);
+    const vh = state.viewpointHeight;
+    const day = computeDay(y, m, d, point, buildingObs, treeObs, DAY_STEP_MIN, vh);
 
     const months = [];
     for (let mm = 0; mm < 12; mm++) {
-      const r = computeDay(y, mm, 21, point, buildingObs, treeObs, MONTH_STEP_MIN);
+      const r = computeDay(y, mm, 21, point, buildingObs, treeObs, MONTH_STEP_MIN, vh);
       months.push({ month: mm, lit: r.lit, treeFiltered: r.treeFiltered, possible: r.possible });
     }
     renderReport(point, day, months, buildingObs.length, treeObs.length);
@@ -435,6 +437,27 @@ const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Se
 
 function hoursStr(min) {
   return `${(min / 60).toFixed(1)} h`;
+}
+
+// Viewpoint height options: ground plus floors 1-10 at 3 m per floor + 1 m
+// standing eye / balcony-rail height.
+function ordinal(n) {
+  if (n % 100 >= 11 && n % 100 <= 13) return `${n}th`;
+  return `${n}${['th', 'st', 'nd', 'rd'][n % 10] || 'th'}`;
+}
+
+function viewpointOptions() {
+  const opts = [{ h: 0, label: 'Ground (0 m)' }];
+  for (let n = 1; n <= 10; n++) {
+    const h = n * 3 + 1;
+    opts.push({ h, label: `${ordinal(n)} floor (~${h} m)` });
+  }
+  return opts
+    .map(
+      (o) =>
+        `<option value="${o.h}"${o.h === state.viewpointHeight ? ' selected' : ''}>${o.label}</option>`
+    )
+    .join('');
 }
 
 function renderReport(point, day, months, buildingCount, treeCount) {
@@ -471,8 +494,18 @@ function renderReport(point, day, months, buildingCount, treeCount) {
     ? `<div class="report-tree">🌳 + ${hoursStr(day.treeFiltered)} more shaded only by trees</div>`
     : '';
 
+  const vh = state.viewpointHeight;
+  const viewpointNote = vh
+    ? ` Viewpoint elevated to ${vh} m; the building you clicked on is excluded as an
+    obstacle; walls of your own building behind the viewpoint are not modeled.`
+    : '';
+
   $('report-body').innerHTML = `
     <div class="report-coords muted">${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}</div>
+    <div class="report-viewpoint">
+      <label for="viewpoint-height">Viewpoint:</label>
+      <select id="viewpoint-height">${viewpointOptions()}</select>
+    </div>
     <div class="report-day">
       <div class="report-big">${hoursStr(day.lit)}</div>
       <div>direct sun on ${dateStr}<br><span class="muted">of ${hoursStr(day.possible)} possible daylight</span></div>
@@ -489,7 +522,12 @@ function renderReport(point, day, months, buildingCount, treeCount) {
     <p class="muted small">Based on ${buildingCount.toLocaleString()} buildings and
     ${treeCount.toLocaleString()} trees/woods nearby in OSM. Deciduous (and untagged)
     trees are treated as leafless in winter; tree sizes without OSM data are estimated.
-    Ignores terrain and floors above ground level. Times use your device's timezone.</p>`;
+    Ignores terrain. Times use your device's timezone.${viewpointNote}</p>`;
+
+  $('viewpoint-height').addEventListener('change', (e) => {
+    state.viewpointHeight = Number(e.target.value);
+    if (state.reportPoint) runReport(state.reportPoint);
+  });
 }
 
 $('report-close').addEventListener('click', () => {
