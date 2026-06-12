@@ -190,6 +190,25 @@ button:hover { background: #eef2f8; }
 #report-body h3 { font-size: 13px; margin: 14px 0 6px; }
 
 .report-coords { font-size: 11.5px; }
+.report-viewpoint {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+  font-size: 12.5px;
+}
+.report-viewpoint label { color: var(--muted); }
+.report-viewpoint select {
+  flex: 1;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #f7f9fc;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--ink);
+  cursor: pointer;
+}
 .report-day { display: flex; gap: 10px; align-items: center; margin-top: 8px; line-height: 1.35; }
 .report-big { font-size: 30px; font-weight: 700; color: var(--accent); }
 .report-windows { margin-top: 8px; line-height: 1.5; }
@@ -247,4 +266,29 @@ button:hover { background: #eef2f8; }
     width: auto;
     max-height: 55vh;
   }
+}
+
+/* ---- sun-hours heatmap -------------------------------------------------- */
+
+#toggle-heatmap.active {
+  background: var(--gold);
+  border-color: #dfae3a;
+  font-weight: 600;
+}
+
+.heatmap-legend {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.heatmap-legend[hidden] { display: none; }
+.heatmap-gradient {
+  flex: 1;
+  height: 10px;
+  border-radius: 5px;
+  /* Keep in sync with COLOR_STOPS in src/heatmap.js. */
+  background: linear-gradient(to right, #0c1040 0%, #146e82 35%, #46aa5a 65%, #ffdc50 100%);
 }

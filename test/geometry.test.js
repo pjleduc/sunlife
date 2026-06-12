@@ -203,3 +203,39 @@ test('mPerDegLon shrinks with latitude', () => {
   assert.ok(Math.abs(mPerDegLon(0) - M_PER_DEG_LAT) < 1e-9);
   assert.ok(mPerDegLon(60) < M_PER_DEG_LAT * 0.51);
 });
+
+test('isSunBlocked: observer height lifts the ray clear of a wall', () => {
+  // 0..10 m wall slab crossed at t = 9..11 m; at 30 degrees the ray climbs
+  // tan(30) * t ~ 5.2..6.4 m over that span on top of the observer height.
+  const obstacles = prepareObstacles({ lng: 0, lat: 0 }, [wall()]);
+  const alt30 = (30 * Math.PI) / 180;
+  // From 8 m up the ray enters the footprint at ~13.2 m > 10 m: clear.
+  assert.equal(isSunBlocked(obstacles, 0, alt30, 8), false);
+  // From 2 m up it spans ~7.2..8.4 m, inside the 0..10 m slab: blocked.
+  assert.equal(isSunBlocked(obstacles, 0, alt30, 2), true);
+});
+
+test('isSunBlocked: elevated observer skips the building it stands in', () => {
+  const inside = prepareObstacles({ lng: D / 2, lat: D / 2 }, [
+    { rings: square(), height: 10 },
+  ]);
+  assert.equal(inside[0].inside, true);
+  assert.equal(isSunBlocked(inside, 0, Math.PI / 3), true); // ground: eternal shadow
+  assert.equal(isSunBlocked(inside, 0, Math.PI / 3, 4), false); // balcony: own building skipped
+});
+
+test('isSunBlocked: omitting observerHeight behaves exactly like 0', () => {
+  const obstacles = prepareObstacles({ lng: 0, lat: 0 }, [wall()]);
+  const inside = prepareObstacles({ lng: D / 2, lat: D / 2 }, [
+    { rings: square(), height: 10 },
+  ]);
+  for (const deg of [5, 10, 30, 50, 80]) {
+    const alt = (deg * Math.PI) / 180;
+    assert.equal(isSunBlocked(obstacles, 0, alt), isSunBlocked(obstacles, 0, alt, 0));
+    assert.equal(isSunBlocked(inside, 0, alt), isSunBlocked(inside, 0, alt, 0));
+  }
+  // The pre-existing ground-level expectations still hold verbatim.
+  assert.equal(isSunBlocked(obstacles, 0, (30 * Math.PI) / 180), true);
+  assert.equal(isSunBlocked(obstacles, 0, (50 * Math.PI) / 180), false);
+  assert.equal(isSunBlocked(inside, 0, Math.PI / 3), true);
+});

@@ -40,6 +40,16 @@ the dark.*
   passes under a crown) and **seasonal leaf cycles**: deciduous trees stop
   blocking sun in winter, so a maple-lined street stays bright in January.
   Reports split "direct sun" from "shaded only by trees"
+- 🔥 **Sun-hours heatmap** — one click paints the whole visible neighborhood
+  by hours of direct sun for the selected day (navy = all-day shade, gold =
+  full sun), computed in a Web Worker against every building and in-leaf tree
+- 🏢 **Viewpoint height** — reports have a floor selector (ground to 10th
+  floor), so you can check *your* balcony, not the pavement below it; the
+  building you clicked on is excluded once you're elevated
+- ⛰️ **Terrain horizons** — free AWS elevation tiles (~76 m grid, ±25 km)
+  let reports account for hills and mountains, with earth-curvature
+  correction; a Chamonix valley floor on Dec 21 correctly drops from 8.5 h
+  of daylight to ~3 h of actual sun
 - 🏙️ **3D building view** — toggle extruded buildings and floating tree
   canopies to sanity-check heights
 - 🔎 **Address search** (Nominatim) and geolocation
@@ -121,8 +131,11 @@ covered by unit tests (`node --test`).
 
 ## Accuracy & limitations
 
-- **Terrain is assumed flat.** Hills, ridges and valley walls are not
-  considered (a big deal in mountainous areas — see roadmap).
+- **Terrain applies to sun reports only.** The painted shadow polygons and
+  the sun-hours heatmap don't yet include terrain horizons (roadmap), so in
+  mountain valleys trust the click-report numbers over the visuals. The
+  elevation grid is ~76 m resolution — fine for mountains, too coarse for
+  small knolls.
 - **Tree cover is only as good as OSM mapping.** Many neighborhoods have few
   or no trees mapped, and most mapped trees lack height/crown/leaf tags, so
   defaults are used. The 🌳 toggle lets you exclude trees entirely if you
@@ -131,8 +144,9 @@ covered by unit tests (`node --test`).
 - **Heights are only as good as OSM.** In areas with little height data, most
   buildings fall back to estimates. The status bar and each sun report tell you
   how much is estimated; treat low-coverage areas with skepticism.
-- **Reports are computed at ground level.** A 3rd-floor balcony gets more sun
-  than the pavement below it.
+- **Elevated viewpoints are approximate.** The floor selector raises the eye
+  but doesn't model the walls of your own building behind the viewpoint, so
+  a north-facing balcony reads the same as a south-facing one at equal height.
 - **Times use your device's timezone**, which is what you want when exploring
   homes near where you live, but is misleading for far-away cities.
 - Only buildings loaded in/near the current view are considered, and obstacles
@@ -144,6 +158,7 @@ covered by unit tests (`node --test`).
 | --- | --- | --- |
 | Building & tree data | © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors via Overpass API | ODbL |
 | Basemap tiles | [CARTO Positron](https://carto.com/basemaps/) (OSM data) | free for non-commercial use |
+| Elevation | [Terrain Tiles on AWS Open Data](https://registry.opendata.aws/terrain-tiles/) (Mapzen terrarium) | open (SRTM, 3DEP, etc.) |
 | Geocoding | [Nominatim](https://nominatim.org/) | usage policy applies |
 | Sun math | [SunCalc](https://github.com/mourner/suncalc) | BSD-2-Clause |
 | Map renderer | [MapLibre GL JS](https://maplibre.org/) | BSD-3-Clause |
@@ -185,10 +200,11 @@ self-hostable shadow simulator with vegetation:
 ## Roadmap
 
 - [x] Tree, hedge and woodland shade from OSM with seasonal leaf cycles
-- [ ] Terrain occlusion from a DEM (e.g. AWS Terrain Tiles / Mapzen terrarium)
+- [x] Terrain occlusion from a DEM (AWS Terrain Tiles) in sun reports
+- [x] Report height offset ("my balcony is on the 3rd floor")
+- [x] Sun-hours heatmap overlay for a whole neighborhood
+- [ ] Terrain in the heatmap and painted shadows (reports only, today)
 - [ ] Partial transparency for leafless deciduous crowns (~40% blocking)
-- [ ] Report height offset ("my balcony is on the 3rd floor")
-- [ ] Annual sun-hours heatmap overlay for a whole neighborhood
 - [ ] Compare mode: pin several candidate homes side by side
 - [ ] Permalinks that include date/time and report point
 
